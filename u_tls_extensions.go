@@ -115,6 +115,36 @@ func (e *StatusRequestExtension) Read(b []byte) (int, error) {
 	return e.Len(), io.EOF
 }
 
+type StatusRequestV2Extension struct {
+}
+
+func (e *StatusRequestV2Extension) writeToUConn(uc *UConn) error {
+	uc.HandshakeState.Hello.OcspStapling = true
+	return nil
+}
+
+func (e *StatusRequestV2Extension) Len() int {
+	return 13
+}
+
+func (e *StatusRequestV2Extension) Read(b []byte) (int, error) {
+	if len(b) < e.Len() {
+		return 0, io.ErrShortBuffer
+	}
+	// RFC 4366, section 3.6
+	b[0] = byte(17 >> 8)
+	b[1] = byte(17)
+	b[2] = 0
+	b[3] = 9
+	b[4] = 0
+	b[5] = 7
+	b[6] = 2 // OCSP type
+	b[7] = 0
+	b[8] = 4
+	// Two zero valued uint16s for the two lengths.
+	return e.Len(), io.EOF
+}
+
 type SupportedCurvesExtension struct {
 	Curves []CurveID
 }
@@ -207,6 +237,37 @@ func (e *SignatureAlgorithmsExtension) Read(b []byte) (int, error) {
 	return e.Len(), io.EOF
 }
 
+type SignatureAlgorithmsCertExtension struct {
+	SupportedSignatureAlgorithms []SignatureScheme
+}
+
+func (e *SignatureAlgorithmsCertExtension) writeToUConn(uc *UConn) error {
+	uc.HandshakeState.Hello.SupportedSignatureAlgorithms = e.SupportedSignatureAlgorithms
+	return nil
+}
+
+func (e *SignatureAlgorithmsCertExtension) Len() int {
+	return 6 + 2*len(e.SupportedSignatureAlgorithms)
+}
+
+func (e *SignatureAlgorithmsCertExtension) Read(b []byte) (int, error) {
+	if len(b) < e.Len() {
+		return 0, io.ErrShortBuffer
+	}
+	// https://tools.ietf.org/html/rfc5246#section-7.4.1.4.1
+	b[0] = byte(extensionSignatureAlgorithmsCert >> 8)
+	b[1] = byte(extensionSignatureAlgorithmsCert)
+	b[2] = byte((2 + 2*len(e.SupportedSignatureAlgorithms)) >> 8)
+	b[3] = byte(2 + 2*len(e.SupportedSignatureAlgorithms))
+	b[4] = byte((2 * len(e.SupportedSignatureAlgorithms)) >> 8)
+	b[5] = byte(2 * len(e.SupportedSignatureAlgorithms))
+	for i, sigAndHash := range e.SupportedSignatureAlgorithms {
+		b[6+2*i] = byte(sigAndHash >> 8)
+		b[7+2*i] = byte(sigAndHash)
+	}
+	return e.Len(), io.EOF
+}
+
 type RenegotiationInfoExtension struct {
 	// Renegotiation field limits how many times client will perform renegotiation: no limit, once, or never.
 	// The extension still will be sent, even if Renegotiation is set to RenegotiateNever.
@@ -291,6 +352,52 @@ func (e *ALPNExtension) Read(b []byte) (int, error) {
 	stringsLength += 2
 	lengths[0] = byte(stringsLength >> 8)
 	lengths[1] = byte(stringsLength)
+
+	return e.Len(), io.EOF
+}
+
+type ApplicationSettingsExtension struct {
+	SupportedProtocols []string
+}
+
+func (e *ApplicationSettingsExtension) writeToUConn(uc *UConn) error {
+	return nil
+}
+
+func (e *ApplicationSettingsExtension) Len() int {
+	bLen := 2 + 2 + 2 // Type + Length + ALPS Extension length
+	for _, s := range e.SupportedProtocols {
+		bLen += 1 + len(s) // Supported ALPN Length + actual length of protocol
+	}
+	return bLen
+}
+
+func (e *ApplicationSettingsExtension) Read(b []byte) (int, error) {
+	if len(b) < e.Len() {
+		return 0, io.ErrShortBuffer
+	}
+
+	// Read Type.
+	b[0] = byte(extensionALPS >> 8)   // hex: 44 dec: 68
+	b[1] = byte(extensionALPS & 0xff) // hex: 69 dec: 105
+
+	lengths := b[2:] // get the remaining buffer without Type
+	b = b[6:]        // set the buffer to the buffer without Type, Length and ALPS Extension Length (so only the Supported ALPN list remains)
+
+	stringsLength := 0
+	for _, s := range e.SupportedProtocols {
+		l := len(s)            // Supported ALPN Length
+		b[0] = byte(l)         // Supported ALPN Length in bytes hex: 02 dec: 2
+		copy(b[1:], s)         // copy the Supported ALPN as bytes to the buffer
+		b = b[1+l:]            // set the buffer to the buffer without the Supported ALPN Length and Supported ALPN (so we can continue to the next protocol in this loop)
+		stringsLength += 1 + l // Supported ALPN Length (the field itself) + Supported ALPN Length (the value)
+	}
+
+	lengths[2] = byte(stringsLength >> 8) // ALPS Extension Length hex: 00 dec: 0
+	lengths[3] = byte(stringsLength)      // ALPS Extension Length hex: 03 dec: 3
+	stringsLength += 2                    // plus ALPS Extension Length field length
+	lengths[0] = byte(stringsLength >> 8) // Length hex:00 dec: 0
+	lengths[1] = byte(stringsLength)      // Length hex: 05 dec: 5
 
 	return e.Len(), io.EOF
 }
@@ -773,5 +880,34 @@ func (e *FakeRecordSizeLimitExtension) Read(b []byte) (int, error) {
 
 	b[4] = byte(e.Limit >> 8)
 	b[5] = byte(e.Limit & 0xff)
+	return e.Len(), io.EOF
+}
+
+type DelegatedCredentialsExtension struct {
+	AlgorithmsSignature []SignatureScheme
+}
+
+func (e *DelegatedCredentialsExtension) writeToUConn(uc *UConn) error {
+	return nil
+}
+
+func (e *DelegatedCredentialsExtension) Len() int {
+	return 6 + 2*len(e.AlgorithmsSignature)
+}
+
+func (e *DelegatedCredentialsExtension) Read(b []byte) (int, error) {
+	if len(b) < e.Len() {
+		return 0, io.ErrShortBuffer
+	}
+	b[0] = byte(extensionDelegatedCredentials >> 8)
+	b[1] = byte(extensionDelegatedCredentials)
+	b[2] = byte((2 + 2*len(e.AlgorithmsSignature)) >> 8)
+	b[3] = byte(2 + 2*len(e.AlgorithmsSignature))
+	b[4] = byte((2 * len(e.AlgorithmsSignature)) >> 8)
+	b[5] = byte(2 * len(e.AlgorithmsSignature))
+	for i, sigAndHash := range e.AlgorithmsSignature {
+		b[6+2*i] = byte(sigAndHash >> 8)
+		b[7+2*i] = byte(sigAndHash)
+	}
 	return e.Len(), io.EOF
 }
