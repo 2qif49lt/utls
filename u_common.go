@@ -146,7 +146,7 @@ var (
 	HelloRandomizedNoALPN = ClientHelloID{helloRandomizedNoALPN, helloAutoVers, nil}
 
 	// The rest will will parrot given browser.
-	HelloFirefox_Auto = HelloFirefox_102
+	HelloFirefox_Auto = HelloFirefox_99
 	HelloFirefox_55   = ClientHelloID{helloFirefox, "55", nil}
 	HelloFirefox_56   = ClientHelloID{helloFirefox, "56", nil}
 	HelloFirefox_63   = ClientHelloID{helloFirefox, "63", nil}
@@ -154,7 +154,7 @@ var (
 	//	HelloFirefox_95   = ClientHelloID{helloFirefox, "95", nil}
 	HelloFirefox_99  = ClientHelloID{helloFirefox, "99", nil}
 	HelloFirefox_102 = ClientHelloID{helloFirefox, "102", nil}
-	//	HelloFirefox_104  = ClientHelloID{helloFirefox, "104", nil}
+	HelloFirefox_104 = ClientHelloID{helloFirefox, "104", nil}
 
 	HelloChrome_Auto = HelloChrome_102
 	HelloChrome_58   = ClientHelloID{helloChrome, "58", nil}
